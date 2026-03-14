@@ -1,0 +1,23 @@
+# Paths
+STORAGE_PATH = "./storage/key_value_stores/default"
+RESULTS_PATH = "./storage/datasets/default"
+
+# Crawler behaviour
+MAX_CONCURRENCY = 5  # Max simultaneous requests. Keep low to be respectful.
+REQUEST_TIMEOUT_SECS = 30  # Give up on a page after this many seconds
+MAX_CRAWL_DEPTH = 2  # How many links deep to follow from a company's homepage
+MAX_CANDIDATES_PER_COMPANY = 3  # Max PDF candidates to try per company
+
+# Detection
+SCORE_THRESHOLD = 2  # Minimum score from detector.py to enqueue a link
+
+# Rate limiting
+MIN_CRAWL_DELAY_SECS = 1.0  # Wait at least this long between requests to the same domain
+
+# Search
+SEARCH_QUERY_TEMPLATE = "{company} sustainability report filetype:pdf {year}"
+CURRENT_YEAR = 2024
+
+# PDF size limits (bytes)
+MIN_PDF_SIZE_BYTES = 100 * 1024  # 100KB - too small to be a real report
+MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024  # 200MB - something is wrong
