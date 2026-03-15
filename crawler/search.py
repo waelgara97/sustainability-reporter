@@ -48,7 +48,7 @@ async def brave_search(company: str, client: httpx.AsyncClient) -> list[dict]:
     MAX_CANDIDATES_PER_COMPANY. Returns empty list on API error.
     """
     q = SEARCH_QUERY_TEMPLATE.format(company=company)
-    freshness_range = f"{CURRENT_YEAR - 2}-01-01to{CURRENT_YEAR}-12-31"
+    freshness_range = f"{CURRENT_YEAR - 4}-01-01to{CURRENT_YEAR}-12-31"
     params = {
         "q": q,
         "count": BRAVE_SEARCH_NUM_RESULTS,

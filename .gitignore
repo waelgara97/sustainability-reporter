@@ -1,4 +1,5 @@
 .env
+logs/
 storage/
 __pycache__/
 .venv/

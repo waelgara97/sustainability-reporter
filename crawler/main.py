@@ -51,12 +51,15 @@ async def run_crawl(companies: list[str], progress_callback) -> list[dict]:
     logger.info("Starting crawl for %s companies", len(companies))
 
     # ── Step 1: Brave Search API ───────────────────────────────────────────────
-    # Run all search queries in parallel; one query per company.
+    # Run search queries sequentially with a 1.1-second pause between them.
+    # Brave's free tier enforces 1 request/second; parallel calls cause 429 errors.
     async with httpx.AsyncClient(follow_redirects=True) as client:
-        search_results: list[list[dict]] = await asyncio.gather(
-            *[brave_search(c, client) for c in companies],
-            return_exceptions=False,
-        )
+        search_results: list[list[dict]] = []
+        for i, company in enumerate(companies):
+            result = await brave_search(company, client)
+            search_results.append(result)
+            if i < len(companies) - 1:
+                await asyncio.sleep(1.1)
 
     # Record queries used (do this after the API calls succeed)
     record_queries(len(companies))

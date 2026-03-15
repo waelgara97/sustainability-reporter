@@ -1,6 +1,12 @@
 # Sustainability Report Crawler - Streamlit UI
 # Run with: uv run streamlit run app.py  (or: streamlit run app.py)
 
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    pass  # truststore not installed; SSL uses Python's default CA bundle
+
 import asyncio
 import logging
 import os

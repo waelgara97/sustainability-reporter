@@ -1,50 +1,63 @@
 # Sustainability Report Crawler - Run script
-# Requires Python 3.10+ (3.11+ recommended). Crawlee 1.x does not support Python 3.9.
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-# Prefer Python 3.11, then 3.10, then default python
-$py = $null
-foreach ($ver in @("3.11", "3.10")) {
+# ── Suppress Streamlit's first-run email prompt ───────────────────────────────
+$stCreds = "$env:USERPROFILE\.streamlit\credentials.toml"
+if (-not (Test-Path $stCreds)) {
+    New-Item -ItemType Directory -Force "$env:USERPROFILE\.streamlit" | Out-Null
+    "[general]`nemail = `"`"`n" | Set-Content $stCreds -Encoding UTF8
+}
+
+# ── 1. Try uv (auto-install if missing) ──────────────────────────────────────
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    Write-Host "uv not found — installing..." -ForegroundColor Cyan
     try {
-        $out = & py -$ver -c "import sys; print(sys.executable)" 2>$null
-        if ($LASTEXITCODE -eq 0 -and $out) {
-            $py = $out.Trim()
-            break
-        }
-    } catch {}
-}
-if (-not $py) {
-    $py = (Get-Command python -ErrorAction SilentlyContinue).Source
-}
-
-if (-not $py) {
-    Write-Host "Python not found. Install Python 3.11+ from https://www.python.org/downloads/ or run: winget install Python.Python.3.11" -ForegroundColor Red
-    exit 1
-}
-
-$verStr = & $py --version 2>&1
-Write-Host "Using: $py ($verStr)"
-
-# Check version is at least 3.10
-$v = & $py -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
-if ($v) {
-    $major, $minor = $v -split '\.'
-    if ([int]$major -lt 3 -or ([int]$major -eq 3 -and [int]$minor -lt 10)) {
-        Write-Host "This project requires Python 3.10+ (Crawlee 1.x). You have $verStr" -ForegroundColor Red
-        Write-Host "Install Python 3.11: winget install Python.Python.3.11" -ForegroundColor Yellow
-        exit 1
+        $ErrorActionPreference = "Continue"
+        powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+        $ErrorActionPreference = "Stop"
+        $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+    } catch {
+        $ErrorActionPreference = "Stop"
+        Write-Host "Could not auto-install uv — will use pip instead." -ForegroundColor Yellow
     }
 }
 
-# Use venv if present; otherwise run streamlit via python -m
-$venvScript = Join-Path $PSScriptRoot ".venv\Scripts\Activate.ps1"
-if (Test-Path $venvScript) {
-    Write-Host "Activating .venv..."
-    & $venvScript
-    & streamlit run app.py
-} else {
-    Write-Host "No .venv found. Install deps with: $py -m pip install -r requirements.txt" -ForegroundColor Yellow
-    & $py -m streamlit run app.py
+if (Get-Command uv -ErrorAction SilentlyContinue) {
+    Write-Host "Starting app with uv..." -ForegroundColor Green
+    uv run streamlit run app.py
+    exit
 }
+
+# ── 2. Pip fallback (when uv is unavailable) ─────────────────────────────────
+Write-Host "Falling back to pip..." -ForegroundColor Yellow
+
+$venvActivate = Join-Path $PSScriptRoot ".venv\Scripts\Activate.ps1"
+if (-not (Test-Path $venvActivate)) {
+    Write-Host "Creating virtual environment..." -ForegroundColor Cyan
+    python -m venv .venv
+}
+& $venvActivate
+
+Write-Host "Installing/updating dependencies..." -ForegroundColor Cyan
+
+# Install tornado <6.5 first to avoid a Windows Defender .pyd lock bug
+# in tornado 6.5+ that blocks pip from completing the install.
+$installed = $false
+try {
+    pip install "tornado>=6.0.3,<6.5.0" --quiet
+    pip install -r requirements.txt --quiet
+    $installed = $true
+} catch {}
+
+if (-not $installed) {
+    Write-Host "Retrying with --trusted-host (corporate SSL proxy workaround)..." -ForegroundColor Yellow
+    pip install "tornado>=6.0.3,<6.5.0" --quiet `
+        --trusted-host pypi.org --trusted-host files.pythonhosted.org
+    pip install -r requirements.txt --quiet `
+        --trusted-host pypi.org --trusted-host files.pythonhosted.org
+}
+
+Write-Host "Starting app..." -ForegroundColor Green
+python -m streamlit run app.py

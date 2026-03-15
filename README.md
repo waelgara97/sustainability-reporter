@@ -2,58 +2,43 @@
 
 A local Streamlit app that takes a CSV of company names, crawls the web for their sustainability report PDFs, shows progress, and lets you download selected reports as a zip.
 
-## Prerequisites
+## Quick Start (Windows)
 
-- **Python 3.11+**
-- **uv** (recommended) or **pip**
+Open PowerShell in the project folder and run:
 
-To install uv (optional):
+```powershell
+.\run.ps1
+```
+
+That's it. The script installs **uv** (if missing), which then automatically downloads Python, creates the virtual environment, installs all dependencies, and starts the app.
+
+A browser window will open at `http://localhost:8501`.
+
+## Manual Start
+
+If you prefer to run the command yourself:
 
 ```bash
-# Windows (PowerShell)
+uv run streamlit run app.py
+```
+
+`uv run` handles Python, the virtual environment, and dependency installation in one step. If you don't have `uv`, install it first:
+
+```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-## Install
+## Configuration
 
-From the project root:
+Copy `.env.example` to `.env` and fill in your Brave Search API key:
 
-**With uv:**
-
-```bash
-uv sync
+```
+BRAVE_API_KEY=your_brave_api_key_here
 ```
 
-**With pip:**
+Get a free key at https://api-dashboard.search.brave.com/ (free tier: ~1,000 queries/month).
 
-On Windows, if you have multiple Python versions, create the venv with 3.11+ explicitly (e.g. `py -3.11` or `py -3.13`). If the default `python` is 3.9, the app will not start.
-
-```bash
-# Windows (use explicit version if you have 3.9 and 3.11+ installed)
-py -3.11 -m venv .venv
-# or: py -3.13 -m venv .venv
-
-# macOS/Linux, or when python is already 3.11+
-python -m venv .venv
-
-.venv\Scripts\activate   # Windows
-# source .venv/bin/activate   # macOS/Linux
-pip install -r requirements.txt
-```
-
-## Run
-
-```bash
-# With uv
-uv run streamlit run app.py
-
-# With pip (activate venv first)
-streamlit run app.py
-```
-
-A browser window will open. Upload a CSV, click "Start crawler", then select rows and use "Download selected" to get a zip of the PDFs.
-
-## CSV format
+## CSV Format
 
 The CSV must have a column named **company**, **Company**, **name**, or **Name** with one company name per row.
 
@@ -69,32 +54,30 @@ TotalEnergies
 
 Save as UTF-8. Empty rows are skipped.
 
-## Troubleshooting
+## Usage
 
-### "streamlit is not recognized" or "uv is not recognized"
-- **Streamlit**: Use the module form: `python -m streamlit run app.py` (after activating your venv). If that fails, you don’t have Streamlit installed—see Install above.
-- **uv**: Install [uv](https://docs.astral.sh/uv/getting-started/installation/) or use **pip** instead (create a venv and `pip install -r requirements.txt`).
+1. Upload a CSV with company names.
+2. Click **Start Crawler**.
+3. Select rows in the results table and click **Download selected** to get a zip of the PDFs.
 
-### "cannot import name 'TypeAlias' from 'typing'" or app fails to start
-Your venv was created with **Python 3.9**. This project needs **Python 3.10+** (3.11+ recommended). Recreate the venv with a newer Python—see the Install section (use `py -3.11 -m venv .venv` or `py -3.13 -m venv .venv` on Windows).
+## Debugging
 
-### "Could not find a version that satisfies the requirement crawlee[beautifulsoup]>=1.3.0"
-You need **Python 3.10 or 3.11+**. Crawlee 1.x does not support Python 3.9.
+- **Console logging** — Log messages are printed to the terminal. You'll see steps like "Credentials OK", "Quota check OK", "Brave search done", "Crawler run finished", and "Crawl complete" with counts. Any exception in the crawler is logged with a full traceback.
+- **Persisted error in the UI** — If the crawl fails (e.g. missing API key, quota exceeded, network error), the error message is stored and shown in **Section 2 (Run Crawler)** so it doesn't disappear after the page refreshes.
+- **Log level** — Set `LOG_LEVEL=DEBUG` in your `.env` for more verbose logs (e.g. per-company search results). Default is `INFO`.
+- **Log file** — Logs are also written to `logs/app.log` in the project folder (rotating, up to 3 backup files).
 
-- Check version: `python --version` or `py -0p`
-- Install Python 3.11: [python.org](https://www.python.org/downloads/) or `winget install Python.Python.3.11`
-- Create a venv with that version and reinstall:
-  ```powershell
-  py -3.11 -m venv .venv
-  .venv\Scripts\Activate.ps1
-  pip install -r requirements.txt
-  streamlit run app.py
-  ```
+Where to look when something goes wrong: check the **red error box** in Section 2, then the **terminal** or **logs/app.log** for the full traceback and step-by-step messages.
 
-### Run script (Windows)
-From the project folder in PowerShell:
-```powershell
-.\run.ps1
+## Without uv (advanced)
+
+If you cannot use `uv`, you can set up a virtual environment manually:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate   # Windows
+pip install -r requirements.txt
+streamlit run app.py
 ```
-This uses Python 3.11 if available; otherwise it prints what to install.
 
+Requires **Python 3.11+**.
