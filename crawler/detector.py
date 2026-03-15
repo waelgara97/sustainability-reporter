@@ -2,7 +2,7 @@
 
 import re
 
-from config import SCORE_THRESHOLD
+from config import CURRENT_YEAR, SCORE_THRESHOLD
 
 
 def score_link(url: str, anchor_text: str) -> int:
@@ -29,7 +29,10 @@ def score_link(url: str, anchor_text: str) -> int:
         score += 1
     if url.rstrip("/").endswith(".pdf"):
         score += 2
-    if re.search(r"\b(201[89]|202[0-5])\b", url):
+    # Match any year from 2018 up to and including the current year
+    earliest_year = 2018
+    year_pattern = "|".join(str(y) for y in range(earliest_year, CURRENT_YEAR + 1))
+    if re.search(rf"\b({year_pattern})\b", url):
         score += 1
     if "annual-report" in url:
         score += 1

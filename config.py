@@ -21,3 +21,10 @@ CURRENT_YEAR = 2024
 # PDF size limits (bytes)
 MIN_PDF_SIZE_BYTES = 100 * 1024  # 100KB - too small to be a real report
 MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024  # 200MB - something is wrong
+
+# HTTP
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)

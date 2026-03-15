@@ -3,6 +3,7 @@
 
 import asyncio
 import threading
+import time
 
 import pandas as pd
 import streamlit as st
@@ -11,6 +12,12 @@ from config import STORAGE_PATH
 from crawler.main import run_crawl
 from utils.csv_reader import read_companies_csv
 from utils.zip_builder import build_zip
+
+
+@st.cache_data(show_spinner=False)
+def _cached_zip(filenames_tuple: tuple[str, ...], storage_path: str) -> bytes:
+    """Build zip only when the selection changes, not on every rerender."""
+    return build_zip(list(filenames_tuple), storage_path)
 
 st.set_page_config(page_title="Sustainability Report Crawler", layout="wide")
 st.title("Sustainability Report Crawler")
@@ -85,15 +92,19 @@ if start_crawler := st.button("Start crawler", type="primary", disabled=not has_
 if not has_companies:
     st.caption("Upload a valid CSV above to enable the crawler.")
 
-# Progress: show live progress; when thread is done, take final results
+# Progress: poll every 0.5 s while the thread is alive so the bar updates live
 if st.session_state.crawl_running and "_crawl_thread" in st.session_state:
     t = st.session_state._crawl_thread
     shared = st.session_state._crawl_shared
     n = len(st.session_state.companies)
+    progress_so_far = len(shared["progress"])
+
+    st.progress(min(1.0, progress_so_far / max(1, n)))
+    st.caption(f"Processed {progress_so_far} / {n} companies…")
+
     if t.is_alive():
-        progress_so_far = len(shared["progress"])
-        st.progress(min(1.0, progress_so_far / max(1, n)))
-        st.caption(f"Processed {progress_so_far} / {n} companies. Refresh the page to see updates.")
+        time.sleep(0.5)
+        st.rerun()
     else:
         st.session_state.crawl_running = False
         if shared.get("error"):
@@ -138,7 +149,7 @@ if st.session_state.crawl_results:
     else:
         selected_filenames = []
     can_download = len(selected_filenames) > 0
-    zip_bytes = build_zip(selected_filenames, STORAGE_PATH) if can_download else b""
+    zip_bytes = _cached_zip(tuple(selected_filenames), STORAGE_PATH) if can_download else b""
     st.download_button(
         "Download selected",
         data=zip_bytes,

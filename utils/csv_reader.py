@@ -60,7 +60,8 @@ def read_companies_csv(uploaded_file) -> tuple[list[str], str | None]:
         .dropna()
         .tolist()
     )
-    companies = [c for c in companies if c and not c.isspace()]
+    # astype(str) converts NaN cells to the string "nan" — filter those out too
+    companies = [c for c in companies if c and not c.isspace() and c.lower() != "nan"]
 
     if not companies:
         return [], "No valid company names found (all rows are blank)."
