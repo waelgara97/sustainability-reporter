@@ -4,13 +4,15 @@
 import asyncio
 import threading
 import time
+from calendar import month_name
 
 import pandas as pd
 import streamlit as st
 
-from config import STORAGE_PATH
+from config import MONTHLY_QUERY_LIMIT, QUOTA_WARNING_THRESHOLD, STORAGE_PATH
 from crawler.main import run_crawl
 from utils.csv_reader import read_companies_csv
+from utils.quota import get_usage
 from utils.zip_builder import build_zip
 
 
@@ -18,6 +20,7 @@ from utils.zip_builder import build_zip
 def _cached_zip(filenames_tuple: tuple[str, ...], storage_path: str) -> bytes:
     """Build zip only when the selection changes, not on every rerender."""
     return build_zip(list(filenames_tuple), storage_path)
+
 
 st.set_page_config(page_title="Sustainability Report Crawler", layout="wide")
 st.title("Sustainability Report Crawler")
@@ -31,15 +34,60 @@ if "crawl_running" not in st.session_state:
 if "crawl_progress" not in st.session_state:
     st.session_state.crawl_progress = []  # list of {company, status, ...} as they complete
 
+# ----- Quota banner -----
+usage = get_usage()
+used = usage["used"]
+remaining = usage["remaining"]
+month_label = f"{month_name[usage['month']]} {usage['year']}"
+
+quota_col1, quota_col2 = st.columns([3, 1])
+with quota_col1:
+    bar_value = min(1.0, used / MONTHLY_QUERY_LIMIT)
+    if used >= MONTHLY_QUERY_LIMIT:
+        st.error(
+            f"Monthly quota exhausted — {used}/{MONTHLY_QUERY_LIMIT} queries used in {month_label}. "
+            "Wait until next month or upgrade to a paid plan."
+        )
+    elif used >= QUOTA_WARNING_THRESHOLD:
+        st.warning(
+            f"Quota almost full — {used}/{MONTHLY_QUERY_LIMIT} queries used in {month_label} "
+            f"({remaining} remaining)."
+        )
+    else:
+        st.info(
+            f"Brave API quota — {used}/{MONTHLY_QUERY_LIMIT} queries used in {month_label} "
+            f"({remaining} remaining)."
+        )
+    st.progress(bar_value)
+with quota_col2:
+    st.metric("Remaining this month", remaining)
+
+st.divider()
+
 # ----- Section 1 — Upload -----
 st.header("1. Upload companies")
-uploaded = st.file_uploader("Upload a CSV file with company names", type=["csv"])
 
-if uploaded is not None:
+quota_exhausted = used >= MONTHLY_QUERY_LIMIT
+
+uploaded = st.file_uploader(
+    "Upload a CSV file with company names",
+    type=["csv"],
+    disabled=quota_exhausted,
+)
+
+if quota_exhausted:
+    st.error("Quota exhausted — uploads disabled until the quota resets next month.")
+elif uploaded is not None:
     companies, error = read_companies_csv(uploaded)
     if error:
         st.error(error)
     else:
+        if len(companies) > remaining:
+            st.warning(
+                f"Your CSV has {len(companies)} companies but only {remaining} queries remain. "
+                f"The crawler will refuse to run. Please upload a smaller batch "
+                f"(max {remaining} companies)."
+            )
         st.session_state.companies = companies
         st.success(f"Loaded {len(companies)} companies.")
         st.dataframe(
@@ -59,6 +107,8 @@ else:
 # ----- Section 2 — Run -----
 st.header("2. Run crawler")
 has_companies = len(st.session_state.companies) > 0
+batch_exceeds_quota = len(st.session_state.companies) > remaining
+run_disabled = not has_companies or quota_exhausted or batch_exceeds_quota
 
 
 def _run_in_thread(companies_list, shared: dict):
@@ -77,7 +127,7 @@ def _run_in_thread(companies_list, shared: dict):
         loop.close()
 
 
-if start_crawler := st.button("Start crawler", type="primary", disabled=not has_companies):
+if start_crawler := st.button("Start crawler", type="primary", disabled=run_disabled):
     st.session_state.crawl_running = True
     st.session_state.crawl_progress = []
     st.session_state.crawl_results = []
@@ -91,6 +141,13 @@ if start_crawler := st.button("Start crawler", type="primary", disabled=not has_
 
 if not has_companies:
     st.caption("Upload a valid CSV above to enable the crawler.")
+elif quota_exhausted:
+    st.caption("Monthly quota exhausted — crawler disabled until next month.")
+elif batch_exceeds_quota:
+    st.caption(
+        f"Batch too large: {len(st.session_state.companies)} companies > {remaining} remaining queries. "
+        "Reduce your CSV to enable the crawler."
+    )
 
 # Progress: poll every 0.5 s while the thread is alive so the bar updates live
 if st.session_state.crawl_running and "_crawl_thread" in st.session_state:

@@ -4,13 +4,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Google Custom Search API credentials (required) ──────────────────────────
-# Obtain a key: https://console.cloud.google.com/ → APIs & Services → Credentials
-# Create a CSE:  https://programmablesearchengine.google.com/
-# Free quota:    100 queries / day.  Each run_crawl() call costs len(companies) queries.
-GOOGLE_API_KEY: str = os.environ.get("GOOGLE_API_KEY", "")
-GOOGLE_CSE_ID: str = os.environ.get("GOOGLE_CSE_ID", "")
-GOOGLE_SEARCH_NUM_RESULTS: int = 5  # results returned per company (max 10 per API call)
+# ── Brave Search API credentials (required) ───────────────────────────────────
+# Obtain a key: https://api-dashboard.search.brave.com/
+# Free tier:    ~1,000 queries/month ($5 credit at $5/1,000 queries).
+BRAVE_API_KEY: str = os.environ.get("BRAVE_API_KEY", "")
+BRAVE_SEARCH_NUM_RESULTS: int = 5  # results returned per company (max 20 per API call)
+
+# ── Monthly quota guard ───────────────────────────────────────────────────────
+# Hard stop below the free-tier limit to avoid surprise charges.
+# Free tier: ~1,000 queries/month.  We stop at 950 to keep a safety buffer.
+MONTHLY_QUERY_LIMIT: int = 950       # hard stop — run is refused above this
+QUOTA_WARNING_THRESHOLD: int = 800   # UI warning shown above this
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 STORAGE_PATH = "./storage/key_value_stores/default"

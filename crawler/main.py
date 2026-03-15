@@ -1,4 +1,4 @@
-"""Crawler entry point: uses Google Custom Search API to find URLs, then crawls them."""
+"""Crawler entry point: uses Brave Search API to find URLs, then crawls them."""
 
 import asyncio
 import logging
@@ -18,8 +18,9 @@ from config import (
 )
 from crawler.handlers import set_progress_callback, _invoke_progress
 from crawler.router import build_router
-from crawler.search import _check_credentials, google_search
+from crawler.search import _check_credentials, brave_search
 from crawler.detector import score_link
+from utils.quota import check_quota, record_queries
 
 logger = logging.getLogger(__name__)
 
@@ -28,30 +29,38 @@ async def run_crawl(companies: list[str], progress_callback) -> list[dict]:
     """
     Run the full crawl pipeline for the given companies.
 
-    1. Validates that Google API credentials are present (fails fast with a clear message).
-    2. Calls the Google Custom Search API for each company to get candidate URLs.
-    3. Seeds those URLs into BeautifulSoupCrawler (no google.com scraping).
-    4. Crawler follows IR pages and downloads PDFs.
-    5. Returns one result dict per company: {company, status, pdf_url, filename}.
+    1. Validates that Brave API key is present (fails fast with a clear message).
+    2. Checks monthly quota — raises RuntimeError if batch would exceed the limit.
+    3. Calls the Brave Search API for each company to get candidate URLs.
+    4. Records the queries used against the monthly quota.
+    5. Seeds those URLs into BeautifulSoupCrawler.
+    6. Crawler follows IR pages and downloads PDFs.
+    7. Returns one result dict per company: {company, status, pdf_url, filename}.
 
     companies         — list of company name strings from the CSV
     progress_callback — called with a result dict after each company completes
     """
-    # Fail fast if credentials are missing — much better than a silent empty run
+    # Fail fast if credentials are missing
     _check_credentials()
+
+    # Fail fast if this batch would exceed the monthly quota
+    check_quota(len(companies))
 
     set_progress_callback(progress_callback)
 
-    # ── Step 1: Google Custom Search API ──────────────────────────────────────
+    # ── Step 1: Brave Search API ───────────────────────────────────────────────
     # Run all search queries in parallel to save time; one query per company.
     async with httpx.AsyncClient(follow_redirects=True) as client:
         search_results: list[list[str]] = await asyncio.gather(
-            *[google_search(c, client) for c in companies],
-            return_exceptions=False,  # exceptions return [] from google_search itself
+            *[brave_search(c, client) for c in companies],
+            return_exceptions=False,  # exceptions return [] from brave_search itself
         )
 
+    # Record queries used (do this after the API calls succeed)
+    record_queries(len(companies))
+
     # ── Step 2: Build initial request queue ───────────────────────────────────
-    # google_search() already scored+sorted the URLs.  We pick the top
+    # brave_search() already scored+sorted the URLs.  We pick the top
     # MAX_CANDIDATES_PER_COMPANY that clear SCORE_THRESHOLD, label them,
     # and attach the company name via user_data.
     initial_requests: list[Request] = []
