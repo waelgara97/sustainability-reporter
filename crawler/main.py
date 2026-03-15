@@ -5,7 +5,7 @@ import logging
 from datetime import timedelta
 
 import httpx
-from crawlee import Request
+from crawlee import ConcurrencySettings, Request
 from crawlee.crawlers import BeautifulSoupCrawler
 
 from config import (
@@ -66,6 +66,13 @@ async def run_crawl(companies: list[str], progress_callback) -> list[dict]:
     total_candidates = sum(len(items) for items in search_results)
     logger.info("Brave search done: %s candidate URLs for %s companies", total_candidates, len(companies))
 
+    if total_candidates == 0 and companies:
+        raise RuntimeError(
+            "Brave Search returned no results for any company. "
+            "Check the terminal or logs/app.log for 'Brave API HTTP error' or 'Brave API request failed' (e.g. SSL, 429, or invalid key). "
+            "If the API is OK, try again later or use fewer/simpler company names."
+        )
+
     # ── Step 2: Build initial request queue ───────────────────────────────────
     # brave_search() returns sorted list[dict] (url, publication_year, ...) per company.
     # Enqueue each candidate with user_data for short-circuit and aggregation.
@@ -105,8 +112,11 @@ async def run_crawl(companies: list[str], progress_callback) -> list[dict]:
         router = build_router()
         crawler = BeautifulSoupCrawler(
             request_handler=router,
-            max_concurrency=MAX_CONCURRENCY,
-            min_concurrency=1,
+            concurrency_settings=ConcurrencySettings(
+                min_concurrency=1,
+                max_concurrency=MAX_CONCURRENCY,
+                desired_concurrency=min(1, MAX_CONCURRENCY),
+            ),
             navigation_timeout=timedelta(seconds=REQUEST_TIMEOUT_SECS),
             max_crawl_depth=MAX_CRAWL_DEPTH,
             use_session_pool=True,

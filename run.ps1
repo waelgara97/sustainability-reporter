@@ -3,16 +3,16 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-# ── Suppress Streamlit's first-run email prompt ───────────────────────────────
+# Suppress Streamlit's first-run email prompt
 $stCreds = "$env:USERPROFILE\.streamlit\credentials.toml"
 if (-not (Test-Path $stCreds)) {
     New-Item -ItemType Directory -Force "$env:USERPROFILE\.streamlit" | Out-Null
     "[general]`nemail = `"`"`n" | Set-Content $stCreds -Encoding UTF8
 }
 
-# ── 1. Try uv (auto-install if missing) ──────────────────────────────────────
+# 1. Try uv (auto-install if missing)
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-Host "uv not found — installing..." -ForegroundColor Cyan
+    Write-Host "uv not found - installing..." -ForegroundColor Cyan
     try {
         $ErrorActionPreference = "Continue"
         powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
@@ -20,7 +20,7 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
     } catch {
         $ErrorActionPreference = "Stop"
-        Write-Host "Could not auto-install uv — will use pip instead." -ForegroundColor Yellow
+        Write-Host "Could not auto-install uv - will use pip instead." -ForegroundColor Yellow
     }
 }
 
@@ -30,7 +30,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
     exit
 }
 
-# ── 2. Pip fallback (when uv is unavailable) ─────────────────────────────────
+# 2. Pip fallback (when uv is unavailable)
 Write-Host "Falling back to pip..." -ForegroundColor Yellow
 
 $venvActivate = Join-Path $PSScriptRoot ".venv\Scripts\Activate.ps1"

@@ -483,10 +483,10 @@ st.header("3. Results")
 if st.session_state.crawl_results:
     df = pd.DataFrame(st.session_state.crawl_results).copy()
     df["select"] = False
-    # Display publication_year: None or 0 → "Unknown", valid years as string
+    # Display publication_year: None, NaN, or 0 → "Unknown", valid years as string
     if "publication_year" in df.columns:
         df["publication_year"] = df["publication_year"].apply(
-            lambda y: "Unknown" if (y is None or y == 0) else str(int(y))
+            lambda y: "Unknown" if (pd.isna(y) or y == 0) else str(int(y))
         )
 
     # Colour-hint the status column label

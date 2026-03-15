@@ -17,7 +17,6 @@ import httpx
 from config import (
     BRAVE_API_KEY,
     BRAVE_SEARCH_NUM_RESULTS,
-    CURRENT_YEAR,
     MAX_CANDIDATES_PER_COMPANY,
     SEARCH_QUERY_TEMPLATE,
     USER_AGENT,
@@ -48,13 +47,12 @@ async def brave_search(company: str, client: httpx.AsyncClient) -> list[dict]:
     MAX_CANDIDATES_PER_COMPANY. Returns empty list on API error.
     """
     q = SEARCH_QUERY_TEMPLATE.format(company=company)
-    freshness_range = f"{CURRENT_YEAR - 4}-01-01to{CURRENT_YEAR}-12-31"
+    # Omit freshness — it often leads to 0 results for "company sustainability report filetype:pdf"
     params = {
         "q": q,
         "count": BRAVE_SEARCH_NUM_RESULTS,
         "search_lang": "en",
         "result_filter": "web",
-        "freshness": freshness_range,
     }
     headers = {
         "Accept": "application/json",
@@ -79,6 +77,12 @@ async def brave_search(company: str, client: httpx.AsyncClient) -> list[dict]:
         return []
 
     raw_items = (data.get("web") or {}).get("results") or []
+    if not raw_items:
+        logger.debug(
+            "Brave returned no web.results for %r; response keys: %s",
+            company,
+            list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+        )
 
     results = []
     for item in raw_items:
