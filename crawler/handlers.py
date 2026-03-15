@@ -29,6 +29,9 @@ from crawler.detector import score_link
 # Set by main.run_crawl() before starting; handlers call it when a company result is ready
 _progress_callback = None
 
+# Companies for which we already successfully downloaded a PDF; main clears before each run
+completed_companies: set[str] = set()
+
 
 def set_progress_callback(callback):
     global _progress_callback
@@ -100,9 +103,14 @@ async def handle_pdf_download(context: BeautifulSoupCrawlingContext) -> None:
     """
     Download the PDF directly with httpx (bypasses BeautifulSoup which is HTML-only),
     save it to STORAGE_PATH on disk, push result to dataset, and call progress_callback.
+    Short-circuits if this company is already in completed_companies.
     """
     company = _get_company(context)
+    if company in completed_companies:
+        return
+
     url = context.request.url
+    publication_year = (context.request.user_data or {}).get("publication_year")
 
     try:
         async with httpx.AsyncClient(
@@ -114,13 +122,19 @@ async def handle_pdf_download(context: BeautifulSoupCrawlingContext) -> None:
 
         content_type = response.headers.get("content-type", "")
         if "application/pdf" not in content_type.lower():
-            _invoke_progress({"company": company, "status": "not_found", "pdf_url": url, "filename": ""})
+            _invoke_progress({
+                "company": company, "status": "not_found", "pdf_url": url, "filename": "",
+                "publication_year": None,
+            })
             return
 
         body = response.content
         size = len(body) if body else 0
         if size < MIN_PDF_SIZE_BYTES or size > MAX_PDF_SIZE_BYTES:
-            _invoke_progress({"company": company, "status": "not_found", "pdf_url": url, "filename": ""})
+            _invoke_progress({
+                "company": company, "status": "not_found", "pdf_url": url, "filename": "",
+                "publication_year": None,
+            })
             return
 
         filename = _safe_filename(url, company)
@@ -130,13 +144,21 @@ async def handle_pdf_download(context: BeautifulSoupCrawlingContext) -> None:
             f.write(body)
 
     except Exception:
-        _invoke_progress({"company": company, "status": "error", "pdf_url": url, "filename": ""})
+        _invoke_progress({
+            "company": company, "status": "error", "pdf_url": url, "filename": "",
+            "publication_year": None,
+        })
         return
 
+    completed_companies.add(company)
     await context.push_data({
         "company": company,
         "status": "found",
         "pdf_url": url,
         "filename": filename,
+        "publication_year": publication_year,
     })
-    _invoke_progress({"company": company, "status": "found", "pdf_url": url, "filename": filename})
+    _invoke_progress({
+        "company": company, "status": "found", "pdf_url": url, "filename": filename,
+        "publication_year": publication_year,
+    })

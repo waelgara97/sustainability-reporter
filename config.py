@@ -1,14 +1,24 @@
 import os
+from datetime import date
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from project root (same dir as this file), not CWD — reliable under Streamlit etc.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # ── Brave Search API credentials (required) ───────────────────────────────────
 # Obtain a key: https://api-dashboard.search.brave.com/
 # Free tier:    ~1,000 queries/month ($5 credit at $5/1,000 queries).
-BRAVE_API_KEY: str = os.environ.get("BRAVE_API_KEY", "")
-BRAVE_SEARCH_NUM_RESULTS: int = 5  # results returned per company (max 20 per API call)
+# Tolerant of spaces around "=" in .env and of leading/trailing whitespace in value.
+_raw = (
+    os.environ.get("BRAVE_API_KEY")
+    or os.environ.get("BRAVE_API_KEY ")  # key with trailing space (e.g. "BRAVE_API_KEY = x")
+    or os.environ.get(" BRAVE_API_KEY")  # key with leading space
+    or ""
+)
+BRAVE_API_KEY: str = _raw.strip().strip('"').strip("'")
+BRAVE_SEARCH_NUM_RESULTS: int = 7  # results returned per company (max 20 per API call)
 
 # ── Monthly quota guard ───────────────────────────────────────────────────────
 # Hard stop below the free-tier limit to avoid surprise charges.
@@ -24,7 +34,7 @@ RESULTS_PATH = "./storage/datasets/default"
 MAX_CONCURRENCY = 5       # Max simultaneous requests. Keep low to be respectful.
 REQUEST_TIMEOUT_SECS = 30  # Give up on a page after this many seconds
 MAX_CRAWL_DEPTH = 2        # How many links deep to follow from a company's homepage
-MAX_CANDIDATES_PER_COMPANY = 3  # Max PDF candidates to try per company
+MAX_CANDIDATES_PER_COMPANY = 6  # Max PDF candidates to try per company
 
 # ── Detection ─────────────────────────────────────────────────────────────────
 SCORE_THRESHOLD = 2  # Minimum score from detector.py to enqueue a link
@@ -33,8 +43,8 @@ SCORE_THRESHOLD = 2  # Minimum score from detector.py to enqueue a link
 MIN_CRAWL_DELAY_SECS = 1.0  # Wait at least this long between requests to the same domain
 
 # ── Search query ──────────────────────────────────────────────────────────────
-SEARCH_QUERY_TEMPLATE = "{company} sustainability report filetype:pdf {year}"
-CURRENT_YEAR = 2024
+SEARCH_QUERY_TEMPLATE = "{company} sustainability report filetype:pdf"
+CURRENT_YEAR = date.today().year
 
 # ── PDF size limits (bytes) ───────────────────────────────────────────────────
 MIN_PDF_SIZE_BYTES = 100 * 1024        # 100 KB — too small to be a real report

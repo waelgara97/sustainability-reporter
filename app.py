@@ -2,14 +2,45 @@
 # Run with: uv run streamlit run app.py  (or: streamlit run app.py)
 
 import asyncio
+import logging
+import os
 import threading
 import time
 from calendar import month_name
+from logging.handlers import RotatingFileHandler
 
 import pandas as pd
 import streamlit as st
 
 from config import MONTHLY_QUERY_LIMIT, QUOTA_WARNING_THRESHOLD, STORAGE_PATH
+
+# ── Logging configuration (console + optional file) ───────────────────────────
+_LOG_LEVEL = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
+_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+logging.basicConfig(level=_LOG_LEVEL, format=_FORMAT, datefmt="%Y-%m-%d %H:%M:%S")
+# Remove default handler so we can add our own (avoids duplicate logs if root has one)
+_root = logging.getLogger()
+_root.handlers.clear()
+_console = logging.StreamHandler()
+_console.setLevel(_LOG_LEVEL)
+_console.setFormatter(logging.Formatter(_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
+_root.addHandler(_console)
+_root.setLevel(_LOG_LEVEL)
+_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+try:
+    os.makedirs(_log_dir, exist_ok=True)
+    _file = RotatingFileHandler(
+        os.path.join(_log_dir, "app.log"),
+        maxBytes=2 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    _file.setLevel(_LOG_LEVEL)
+    _file.setFormatter(logging.Formatter(_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
+    _root.addHandler(_file)
+except OSError:
+    pass  # Log directory not writable; console only
+logger = logging.getLogger(__name__)
 from crawler.main import run_crawl
 from utils.csv_reader import read_companies_csv
 from utils.quota import get_usage
@@ -218,6 +249,7 @@ for key, default in [
     ("crawl_results", []),
     ("crawl_running", False),
     ("crawl_progress", []),
+    ("crawl_error", None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -319,6 +351,7 @@ def _run_in_thread(companies_list, shared: dict):
         results = loop.run_until_complete(run_crawl(companies_list, callback))
         shared["results"] = results
     except Exception as e:
+        logger.exception("Crawl failed: %s", e)
         shared["error"] = str(e)
     finally:
         loop.close()
@@ -328,6 +361,7 @@ if start_crawler := st.button("🚀 Start Crawler", type="primary", disabled=run
     st.session_state.crawl_running = True
     st.session_state.crawl_progress = []
     st.session_state.crawl_results = []
+    st.session_state.crawl_error = None
     st.session_state._crawl_shared = {"progress": [], "results": None, "error": None}
     thread = threading.Thread(
         target=_run_in_thread,
@@ -345,6 +379,9 @@ elif batch_exceeds_quota:
         f"Batch too large: {len(st.session_state.companies)} companies "
         f"> {remaining} remaining queries. Reduce your CSV to enable the crawler."
     )
+
+if st.session_state.get("crawl_error"):
+    st.error(st.session_state.crawl_error)
 
 # ── Live progress ─────────────────────────────────────────────────────────────
 if st.session_state.crawl_running and "_crawl_thread" in st.session_state:
@@ -422,7 +459,9 @@ if st.session_state.crawl_running and "_crawl_thread" in st.session_state:
     else:
         st.session_state.crawl_running = False
         if shared.get("error"):
-            st.error(shared["error"])
+            st.session_state.crawl_error = shared["error"]
+        else:
+            st.session_state.crawl_error = None
         st.session_state.crawl_results = shared.get("results") or []
         st.progress(1.0)
         final_found = sum(1 for r in st.session_state.crawl_results if r.get("status") == "found")
@@ -438,6 +477,11 @@ st.header("3. Results")
 if st.session_state.crawl_results:
     df = pd.DataFrame(st.session_state.crawl_results).copy()
     df["select"] = False
+    # Display publication_year: None or 0 → "Unknown", valid years as string
+    if "publication_year" in df.columns:
+        df["publication_year"] = df["publication_year"].apply(
+            lambda y: "Unknown" if (y is None or y == 0) else str(int(y))
+        )
 
     # Colour-hint the status column label
     total = len(df)
@@ -461,9 +505,11 @@ if st.session_state.crawl_results:
             "select": st.column_config.CheckboxColumn("Select", default=False),
             "company": st.column_config.TextColumn("Company"),
             "status": st.column_config.TextColumn("Status"),
+            "publication_year": st.column_config.TextColumn("Publication year"),
             "pdf_url": st.column_config.LinkColumn("PDF URL"),
             "filename": st.column_config.TextColumn("Filename"),
         },
+        column_order=["company", "status", "publication_year", "pdf_url", "filename", "select"],
         use_container_width=True,
         hide_index=True,
     )

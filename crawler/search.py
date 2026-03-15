@@ -18,10 +18,11 @@ from config import (
     BRAVE_API_KEY,
     BRAVE_SEARCH_NUM_RESULTS,
     CURRENT_YEAR,
+    MAX_CANDIDATES_PER_COMPANY,
     SEARCH_QUERY_TEMPLATE,
     USER_AGENT,
 )
-from crawler.detector import score_link
+from crawler.detector import extract_publication_year, score_link
 
 logger = logging.getLogger(__name__)
 
@@ -37,20 +38,23 @@ def _check_credentials() -> None:
         )
 
 
-async def brave_search(company: str, client: httpx.AsyncClient) -> list[str]:
+async def brave_search(company: str, client: httpx.AsyncClient) -> list[dict]:
     """
     Query the Brave Search API for sustainability report URLs for *company*.
 
-    Returns a list of URLs sorted by relevance score (highest first).
-    Returns an empty list on API error (logged, not raised) so the caller
-    can record a 'not_found' result and move on.
+    One search call per company. Uses a rolling 3-year freshness window.
+    Returns a list of dicts with url, title, description, score, publication_year,
+    sorted by publication_year desc (None as 0), then score desc, limited to
+    MAX_CANDIDATES_PER_COMPANY. Returns empty list on API error.
     """
-    query = SEARCH_QUERY_TEMPLATE.format(company=company, year=CURRENT_YEAR)
+    q = SEARCH_QUERY_TEMPLATE.format(company=company)
+    freshness_range = f"{CURRENT_YEAR - 2}-01-01to{CURRENT_YEAR}-12-31"
     params = {
-        "q": query,
+        "q": q,
         "count": BRAVE_SEARCH_NUM_RESULTS,
         "search_lang": "en",
         "result_filter": "web",
+        "freshness": freshness_range,
     }
     headers = {
         "Accept": "application/json",
@@ -76,16 +80,26 @@ async def brave_search(company: str, client: httpx.AsyncClient) -> list[str]:
 
     raw_items = (data.get("web") or {}).get("results") or []
 
-    # Score and sort so the most likely sustainability-report URLs come first
-    scored = []
+    results = []
     for item in raw_items:
         url = item.get("url", "").strip()
-        title = item.get("title", "")
-        description = item.get("description", "")
+        title = item.get("title", "") or ""
+        description = item.get("description", "") or ""
         if not url:
             continue
-        anchor_text = f"{title} {description}"
-        scored.append((score_link(url, anchor_text), url))
+        snippet = f"{title} {description}".strip()
+        score = score_link(url, snippet)
+        publication_year = extract_publication_year(url, snippet)
+        results.append({
+            "url": url,
+            "title": title,
+            "description": description,
+            "score": score,
+            "publication_year": publication_year,
+        })
 
-    scored.sort(key=lambda x: -x[0])
-    return [url for _score, url in scored]
+    # Sort: primary publication_year descending (None as 0), secondary score descending
+    results.sort(key=lambda x: (-(x["publication_year"] or 0), -x["score"]))
+    limited = results[:MAX_CANDIDATES_PER_COMPANY]
+    logger.info("Search for %r: %s results", company, len(limited))
+    return limited

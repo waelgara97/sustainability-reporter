@@ -14,12 +14,10 @@ from config import (
     MIN_CRAWL_DELAY_SECS,
     REQUEST_TIMEOUT_SECS,
     USER_AGENT,
-    SCORE_THRESHOLD,
 )
-from crawler.handlers import set_progress_callback, _invoke_progress
+from crawler.handlers import completed_companies, set_progress_callback, _invoke_progress
 from crawler.router import build_router
 from crawler.search import _check_credentials, brave_search
-from crawler.detector import score_link
 from utils.quota import check_quota, record_queries
 
 logger = logging.getLogger(__name__)
@@ -42,60 +40,65 @@ async def run_crawl(companies: list[str], progress_callback) -> list[dict]:
     """
     # Fail fast if credentials are missing
     _check_credentials()
+    logger.info("Credentials OK")
 
     # Fail fast if this batch would exceed the monthly quota
     check_quota(len(companies))
+    logger.info("Quota check OK, %s queries will be used", len(companies))
 
     set_progress_callback(progress_callback)
+    completed_companies.clear()
+    logger.info("Starting crawl for %s companies", len(companies))
 
     # ── Step 1: Brave Search API ───────────────────────────────────────────────
-    # Run all search queries in parallel to save time; one query per company.
+    # Run all search queries in parallel; one query per company.
     async with httpx.AsyncClient(follow_redirects=True) as client:
-        search_results: list[list[str]] = await asyncio.gather(
+        search_results: list[list[dict]] = await asyncio.gather(
             *[brave_search(c, client) for c in companies],
-            return_exceptions=False,  # exceptions return [] from brave_search itself
+            return_exceptions=False,
         )
 
     # Record queries used (do this after the API calls succeed)
     record_queries(len(companies))
+    total_candidates = sum(len(items) for items in search_results)
+    logger.info("Brave search done: %s candidate URLs for %s companies", total_candidates, len(companies))
 
     # ── Step 2: Build initial request queue ───────────────────────────────────
-    # brave_search() already scored+sorted the URLs.  We pick the top
-    # MAX_CANDIDATES_PER_COMPANY that clear SCORE_THRESHOLD, label them,
-    # and attach the company name via user_data.
+    # brave_search() returns sorted list[dict] (url, publication_year, ...) per company.
+    # Enqueue each candidate with user_data for short-circuit and aggregation.
     initial_requests: list[Request] = []
     companies_with_no_hits: list[str] = []
 
-    for company, urls in zip(companies, search_results):
-        if not urls:
+    for company, items in zip(companies, search_results):
+        if not items:
             companies_with_no_hits.append(company)
             continue
 
-        added = 0
-        from config import MAX_CANDIDATES_PER_COMPANY  # local import avoids circular
-        for url in urls:
-            if added >= MAX_CANDIDATES_PER_COMPANY:
-                break
+        for item in items:
+            url = item["url"]
             label = "pdf" if url.lower().rstrip("/").endswith(".pdf") else "ir"
             initial_requests.append(
                 Request.from_url(
                     url,
                     label=label,
-                    user_data={"company": company},
+                    user_data={
+                        "company": company,
+                        "publication_year": item.get("publication_year"),
+                    },
                     headers={"User-Agent": USER_AGENT},
                 )
             )
-            added += 1
-
-        if added == 0:
-            companies_with_no_hits.append(company)
 
     # Report companies the API returned no usable URLs for
     for company in companies_with_no_hits:
-        _invoke_progress({"company": company, "status": "not_found", "pdf_url": "", "filename": ""})
+        _invoke_progress({
+            "company": company, "status": "not_found", "pdf_url": "", "filename": "",
+            "publication_year": None,
+        })
 
     # ── Step 3: Run the crawler ───────────────────────────────────────────────
     if initial_requests:
+        logger.info("Starting crawler for %s requests", len(initial_requests))
         router = build_router()
         crawler = BeautifulSoupCrawler(
             request_handler=router,
@@ -107,6 +110,7 @@ async def run_crawl(companies: list[str], progress_callback) -> list[dict]:
             retry_on_blocked=True,
         )
         await crawler.run(initial_requests)
+        logger.info("Crawler run finished")
 
         # ── Step 4: Collect results from the dataset ──────────────────────────
         dataset = await crawler.get_dataset()
@@ -118,8 +122,18 @@ async def run_crawl(companies: list[str], progress_callback) -> list[dict]:
             c = item.get("company")
             if not c:
                 continue
-            # Prefer "found" over any earlier entry for the same company
-            if item.get("status") == "found" or c not in results_by_company:
+            existing = results_by_company.get(c)
+            # Exactly one entry per company: prefer "found", then by max publication_year
+            if item.get("status") == "found":
+                if existing is None or existing.get("status") != "found":
+                    results_by_company[c] = item
+                else:
+                    # Keep the one with higher publication_year
+                    ey = existing.get("publication_year") or 0
+                    iy = item.get("publication_year") or 0
+                    if iy > ey:
+                        results_by_company[c] = item
+            elif c not in results_by_company:
                 results_by_company[c] = item
     else:
         results_by_company = {}
@@ -127,10 +141,16 @@ async def run_crawl(companies: list[str], progress_callback) -> list[dict]:
     # ── Step 5: Build final result list in input order ────────────────────────
     all_results: list[dict] = []
     for c in companies:
+        r = results_by_company.get(c)
+        if r is not None and "publication_year" not in r:
+            r = {**r, "publication_year": None}
         all_results.append(
-            results_by_company.get(
-                c,
-                {"company": c, "status": "not_found", "pdf_url": "", "filename": ""},
-            )
+            r
+            if r is not None
+            else {"company": c, "status": "not_found", "pdf_url": "", "filename": "", "publication_year": None},
         )
+    found_n = sum(1 for r in all_results if r.get("status") == "found")
+    not_found_n = sum(1 for r in all_results if r.get("status") == "not_found")
+    error_n = sum(1 for r in all_results if r.get("status") == "error")
+    logger.info("Crawl complete — found: %s, not_found: %s, error: %s", found_n, not_found_n, error_n)
     return all_results

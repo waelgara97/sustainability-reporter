@@ -4,6 +4,30 @@ import re
 
 from config import CURRENT_YEAR, SCORE_THRESHOLD
 
+_YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
+_MIN_YEAR = 2015
+
+
+def extract_publication_year(url: str, text_snippet: str = "") -> int | None:
+    """
+    Infer publication year from URL first, then from text_snippet.
+    Valid years: 2015 <= year <= CURRENT_YEAR. If multiple valid years, return max().
+    Returns None if none valid.
+    """
+    def valid_years(s: str) -> list[int]:
+        if not s:
+            return []
+        years = [int(m) for m in _YEAR_PATTERN.findall(s)]
+        return [y for y in years if _MIN_YEAR <= y <= CURRENT_YEAR]
+
+    from_url = valid_years(url or "")
+    if from_url:
+        return max(from_url)
+    from_snippet = valid_years(text_snippet or "")
+    if from_snippet:
+        return max(from_snippet)
+    return None
+
 
 def score_link(url: str, anchor_text: str) -> int:
     """
