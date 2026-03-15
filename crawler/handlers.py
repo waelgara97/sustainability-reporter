@@ -1,9 +1,14 @@
-"""Handlers for search pages, IR/sustainability pages, and PDF downloads."""
+"""Handlers for IR/sustainability pages and PDF downloads.
+
+Note: there is no handle_search_page here. Google search is performed via the
+Custom Search JSON API (crawler/search.py) before the crawler starts, so
+google.com URLs are never placed in the crawlee queue.
+"""
 
 import asyncio
 import os
 import re
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import urljoin
 
 import httpx
 from crawlee import Request
@@ -42,71 +47,6 @@ def _invoke_progress(result: dict) -> None:
             _progress_callback(result)
         except Exception:
             pass
-
-
-def _extract_google_url(href: str) -> str:
-    """
-    Google wraps search result links as /url?q=ACTUAL_URL&sa=...
-    Extract the real destination URL from the redirect.
-    """
-    if not href:
-        return href
-    # Handle both relative (/url?q=...) and absolute (https://www.google.com/url?q=...) forms
-    if "/url?" in href:
-        parsed = urlparse(href)
-        qs = parse_qs(parsed.query)
-        if "q" in qs:
-            return qs["q"][0]
-    return href
-
-
-async def handle_search_page(context: BeautifulSoupCrawlingContext) -> None:
-    """Parse Google search results; enqueue high-scoring PDF/IR links (cap at MAX_CANDIDATES_PER_COMPANY)."""
-    await asyncio.sleep(MIN_CRAWL_DELAY_SECS)
-
-    company = _get_company(context)
-    soup = getattr(context, "soup", None)
-    if not soup:
-        _invoke_progress({"company": company, "status": "error", "pdf_url": "", "filename": ""})
-        return
-
-    candidates = []
-    for a in soup.find_all("a", href=True):
-        raw_href = a.get("href", "").strip()
-        if not raw_href or raw_href.startswith("#"):
-            continue
-
-        # Unwrap Google redirect URLs (/url?q=https://...)
-        href = _extract_google_url(raw_href)
-
-        # Skip Google's own pages and internal navigation
-        if not href.startswith("http") or "google.com" in href:
-            continue
-
-        text = (a.get_text() or "").strip()
-        score = score_link(href, text)
-        if score >= SCORE_THRESHOLD:
-            candidates.append((score, href, text))
-
-    candidates.sort(key=lambda x: -x[0])
-    to_add = candidates[:MAX_CANDIDATES_PER_COMPANY]
-
-    if not to_add:
-        _invoke_progress({"company": company, "status": "not_found", "pdf_url": "", "filename": ""})
-        return
-
-    requests_to_add = []
-    for _score, url, _text in to_add:
-        label = "pdf" if url.lower().rstrip("/").endswith(".pdf") else "ir"
-        req = Request.from_url(
-            url,
-            label=label,
-            user_data={"company": company},
-            headers={"User-Agent": USER_AGENT},
-        )
-        requests_to_add.append(req)
-
-    await context.add_requests(requests_to_add)
 
 
 async def handle_ir_page(context: BeautifulSoupCrawlingContext) -> None:

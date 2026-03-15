@@ -1,28 +1,42 @@
-# Paths
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ── Google Custom Search API credentials (required) ──────────────────────────
+# Obtain a key: https://console.cloud.google.com/ → APIs & Services → Credentials
+# Create a CSE:  https://programmablesearchengine.google.com/
+# Free quota:    100 queries / day.  Each run_crawl() call costs len(companies) queries.
+GOOGLE_API_KEY: str = os.environ.get("GOOGLE_API_KEY", "")
+GOOGLE_CSE_ID: str = os.environ.get("GOOGLE_CSE_ID", "")
+GOOGLE_SEARCH_NUM_RESULTS: int = 5  # results returned per company (max 10 per API call)
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
 STORAGE_PATH = "./storage/key_value_stores/default"
 RESULTS_PATH = "./storage/datasets/default"
 
-# Crawler behaviour
-MAX_CONCURRENCY = 5  # Max simultaneous requests. Keep low to be respectful.
+# ── Crawler behaviour ─────────────────────────────────────────────────────────
+MAX_CONCURRENCY = 5       # Max simultaneous requests. Keep low to be respectful.
 REQUEST_TIMEOUT_SECS = 30  # Give up on a page after this many seconds
-MAX_CRAWL_DEPTH = 2  # How many links deep to follow from a company's homepage
+MAX_CRAWL_DEPTH = 2        # How many links deep to follow from a company's homepage
 MAX_CANDIDATES_PER_COMPANY = 3  # Max PDF candidates to try per company
 
-# Detection
+# ── Detection ─────────────────────────────────────────────────────────────────
 SCORE_THRESHOLD = 2  # Minimum score from detector.py to enqueue a link
 
-# Rate limiting
+# ── Rate limiting ─────────────────────────────────────────────────────────────
 MIN_CRAWL_DELAY_SECS = 1.0  # Wait at least this long between requests to the same domain
 
-# Search
+# ── Search query ──────────────────────────────────────────────────────────────
 SEARCH_QUERY_TEMPLATE = "{company} sustainability report filetype:pdf {year}"
 CURRENT_YEAR = 2024
 
-# PDF size limits (bytes)
-MIN_PDF_SIZE_BYTES = 100 * 1024  # 100KB - too small to be a real report
-MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024  # 200MB - something is wrong
+# ── PDF size limits (bytes) ───────────────────────────────────────────────────
+MIN_PDF_SIZE_BYTES = 100 * 1024        # 100 KB — too small to be a real report
+MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024  # 200 MB — something is wrong
 
-# HTTP
+# ── HTTP ──────────────────────────────────────────────────────────────────────
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
